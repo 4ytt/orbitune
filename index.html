@@ -1,0 +1,243 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Orbitune</title>
+<meta name="description" content="Dünyanın dört bir yanından canlı radyo. Plağa dokun, çevir, dinle.">
+<meta name="theme-color" content="#F5F4F8" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#121117" media="(prefers-color-scheme: dark)">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Orbitune">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M16 16l4.5 4.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+    <symbol id="i-heart" viewBox="0 0 24 24"><path d="M12 20.2s-7.5-4.6-7.5-10.1A4.3 4.3 0 0 1 12 7.4a4.3 4.3 0 0 1 7.5 2.7c0 5.5-7.5 10.1-7.5 10.1z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></symbol>
+    <symbol id="i-heart-fill" viewBox="0 0 24 24"><path d="M12 20.2s-7.5-4.6-7.5-10.1A4.3 4.3 0 0 1 12 7.4a4.3 4.3 0 0 1 7.5 2.7c0 5.5-7.5 10.1-7.5 10.1z" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></symbol>
+    <symbol id="i-settings" viewBox="0 0 24 24"><path d="M4 7h9M17 7h3M4 17h3M11 17h9" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="15" cy="7" r="2.2" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="9" cy="17" r="2.2" fill="none" stroke="currentColor" stroke-width="2"/></symbol>
+    <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5.8v12.4c0 .8.9 1.3 1.6.8l9.3-6.2a1 1 0 0 0 0-1.6L9.6 5c-.7-.5-1.6 0-1.6.8z" fill="currentColor"/></symbol>
+    <symbol id="i-pause" viewBox="0 0 24 24"><rect x="6.5" y="5" width="4" height="14" rx="1.6" fill="currentColor"/><rect x="13.5" y="5" width="4" height="14" rx="1.6" fill="currentColor"/></symbol>
+    <symbol id="i-prev" viewBox="0 0 24 24"><path d="M17 6.5v11c0 .7-.8 1.1-1.4.7L8.2 13a1.2 1.2 0 0 1 0-2l7.4-5.2c.6-.4 1.4 0 1.4.7z" fill="currentColor"/><rect x="5.5" y="6" width="2.4" height="12" rx="1.2" fill="currentColor"/></symbol>
+    <symbol id="i-next" viewBox="0 0 24 24"><path d="M7 6.5v11c0 .7.8 1.1 1.4.7l7.4-5.2a1.2 1.2 0 0 0 0-2L8.4 5.8C7.8 5.4 7 5.8 7 6.5z" fill="currentColor"/><rect x="16.1" y="6" width="2.4" height="12" rx="1.2" fill="currentColor"/></symbol>
+    <symbol id="i-more" viewBox="0 0 24 24"><circle cx="5.5" cy="12" r="1.9" fill="currentColor"/><circle cx="12" cy="12" r="1.9" fill="currentColor"/><circle cx="18.5" cy="12" r="1.9" fill="currentColor"/></symbol>
+    <symbol id="i-close" viewBox="0 0 24 24"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></symbol>
+    <symbol id="i-back" viewBox="0 0 24 24"><path d="M14.5 5.5L8 12l6.5 6.5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-chevron" viewBox="0 0 24 24"><path d="M9.5 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-down" viewBox="0 0 24 24"><path d="M6 9.5l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-shuffle" viewBox="0 0 24 24"><path d="M4 7h3.2c1.4 0 2.7.7 3.5 1.9l2.6 4.2c.8 1.2 2.1 1.9 3.5 1.9H20M4 17h3.2c1.4 0 2.7-.7 3.5-1.9M13.3 8.9c.8-1.2 2.1-1.9 3.5-1.9H20M17.5 4.5L20 7l-2.5 2.5M17.5 14.5L20 17l-2.5 2.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-moon" viewBox="0 0 24 24"><path d="M19.5 14.6A7.8 7.8 0 0 1 9.4 4.5a7.8 7.8 0 1 0 10.1 10.1z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></symbol>
+    <symbol id="i-share" viewBox="0 0 24 24"><path d="M12 4v11M7.5 8.5L12 4l4.5 4.5M6 13v4.5A2.5 2.5 0 0 0 8.5 20h7a2.5 2.5 0 0 0 2.5-2.5V13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-ban" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="2"/><path d="M6.4 6.4l11.2 11.2" stroke="currentColor" stroke-width="2"/></symbol>
+    <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M3.5 12h17M12 3.5c2.4 2.4 3.6 5.2 3.6 8.5s-1.2 6.1-3.6 8.5c-2.4-2.4-3.6-5.2-3.6-8.5S9.6 5.9 12 3.5z" fill="none" stroke="currentColor" stroke-width="2"/></symbol>
+    <symbol id="i-list" viewBox="0 0 24 24"><path d="M9 7h11M9 12h11M9 17h11" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="4.8" cy="7" r="1.3" fill="currentColor"/><circle cx="4.8" cy="12" r="1.3" fill="currentColor"/><circle cx="4.8" cy="17" r="1.3" fill="currentColor"/></symbol>
+    <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="M5.5 12.5l4 4 9-9" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M5 7h14M10 4h4M7 7l.8 11.2A2 2 0 0 0 9.8 20h4.4a2 2 0 0 0 2-1.8L17 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-paw" viewBox="0 0 24 24"><ellipse cx="12" cy="16" rx="4.6" ry="3.8" fill="currentColor"/><ellipse cx="6" cy="10.8" rx="2" ry="2.5" fill="currentColor"/><ellipse cx="18" cy="10.8" rx="2" ry="2.5" fill="currentColor"/><ellipse cx="9.3" cy="6.6" rx="2" ry="2.5" fill="currentColor"/><ellipse cx="14.7" cy="6.6" rx="2" ry="2.5" fill="currentColor"/></symbol>
+    <symbol id="i-dice" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="4.5" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="9" cy="9" r="1.4" fill="currentColor"/><circle cx="15" cy="15" r="1.4" fill="currentColor"/><circle cx="15" cy="9" r="1.4" fill="currentColor"/><circle cx="9" cy="15" r="1.4" fill="currentColor"/></symbol>
+  </defs>
+</svg>
+
+<div class="app" id="app">
+  <!-- ───────── HOME ───────── -->
+  <main class="home" id="home">
+    <header class="topbar">
+      <div class="brand" aria-label="Orbitune">
+        <span class="brand-dot" aria-hidden="true"></span>
+        <span class="brand-word">orbitune</span>
+      </div>
+      <div class="topbar-actions">
+        <button class="icon-btn" id="btnPets" type="button" data-i18n-label="a11y.pets"><svg><use href="#i-paw"/></svg></button>
+        <button class="icon-btn" id="btnSearch" type="button" data-i18n-label="a11y.search"><svg><use href="#i-search"/></svg></button>
+        <button class="icon-btn" id="btnLibrary" type="button" data-i18n-label="a11y.library"><svg><use href="#i-heart"/></svg></button>
+        <button class="icon-btn" id="btnSettings" type="button" data-i18n-label="a11y.settings"><svg><use href="#i-settings"/></svg></button>
+      </div>
+    </header>
+
+    <div class="offline" id="offline" hidden data-i18n="offline"></div>
+
+    <div class="context-row">
+      <button class="country-pill" id="btnCountry" type="button">
+        <span class="flag" id="countryFlag"></span>
+        <span class="country-name" id="countryName">Türkiye</span>
+        <span class="scope-badge" id="scopeBadge" hidden><svg><use href="#i-shuffle"/></svg></span>
+        <svg class="pill-chev"><use href="#i-down"/></svg>
+      </button>
+      <button class="ctx-pill" id="btnStations" type="button" data-i18n-label="a11y.stations">
+        <svg><use href="#i-list"/></svg><span id="stationsCount">…</span>
+      </button>
+      <button class="sleep-chip" id="sleepChip" type="button" hidden>
+        <svg><use href="#i-moon"/></svg><span id="sleepChipText">29:59</span>
+      </button>
+    </div>
+
+    <section class="mod mod-dial" id="modDial" hidden aria-hidden="true">
+      <div class="dial-head"><span data-i18n="dial.label"></span><span class="dial-freq" id="dialFreq">—</span></div>
+      <div class="dial-band" id="dialBand"><span class="dial-needle" id="dialNeedle"></span></div>
+      <div class="dial-scale"><span>88</span><span>92</span><span>96</span><span>100</span><span>104</span><span>108</span></div>
+    </section>
+
+    <section class="deck" id="deck">
+      <div class="disc-wrap" id="discWrap">
+        <div class="disc" id="disc" role="button" tabindex="0" data-i18n-label="a11y.disc">
+          <div class="disc-grooves"></div>
+          <div class="disc-label" id="discLabel">
+            <span class="disc-mono" id="discMono"></span>
+            <img class="disc-logo" id="discLogo" alt="" hidden referrerpolicy="no-referrer">
+          </div>
+          <div class="disc-hole"></div>
+        </div>
+        <div class="disc-shine" aria-hidden="true"></div>
+        <div class="tonearm" id="tonearm" aria-hidden="true">
+          <span class="arm-pivot"></span><span class="arm-rod"></span><span class="arm-head"></span>
+        </div>
+        <div class="tune-bubble" id="tuneBubble" hidden>
+          <span class="tune-count" id="tuneCount"></span>
+          <span class="tune-name" id="tuneName"></span>
+        </div>
+      </div>
+      <p class="disc-hint" id="discHint"></p>
+    </section>
+
+    <section class="now" id="now">
+      <div class="now-status" id="nowStatus">
+        <span class="eq" id="eq" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+        <span id="nowStatusText"></span>
+      </div>
+      <h1 class="now-name" id="nowName"></h1>
+      <p class="now-meta" id="nowMeta"></p>
+      <div class="now-error" id="nowError" hidden>
+        <span id="nowErrorText"></span>
+        <button type="button" class="link-btn" id="btnTryOther" data-i18n="action.tryAnother"></button>
+      </div>
+    </section>
+
+    <section class="controls">
+      <button class="ctl ctl-sm" id="btnFav" type="button" data-i18n-label="a11y.favorite"><svg><use href="#i-heart"/></svg></button>
+      <button class="ctl" id="btnPrev" type="button" data-i18n-label="a11y.prev"><svg><use href="#i-prev"/></svg></button>
+      <button class="ctl ctl-play" id="btnPlay" type="button" data-i18n-label="a11y.play">
+        <svg class="ico-play"><use href="#i-play"/></svg>
+        <svg class="ico-pause"><use href="#i-pause"/></svg>
+        <span class="spinner" aria-hidden="true"></span>
+      </button>
+      <button class="ctl" id="btnNext" type="button" data-i18n-label="a11y.next"><svg><use href="#i-next"/></svg></button>
+      <button class="ctl ctl-sm" id="btnMore" type="button" data-i18n-label="a11y.more"><svg><use href="#i-more"/></svg></button>
+    </section>
+
+    <section class="mod mod-quick" id="modQuick" hidden>
+      <div class="quick-head">
+        <div class="quick-tabs" id="quickTabs" role="tablist"></div>
+        <button type="button" class="link-btn" id="quickAll" data-i18n="action.seeAll"></button>
+      </div>
+      <div class="quick-body" id="quickBody"></div>
+    </section>
+  </main>
+
+  <!-- ───────── PANELS ───────── -->
+  <div class="scrim" id="scrim" hidden></div>
+
+  <section class="panel" id="panelCountries" aria-modal="true" role="dialog" hidden>
+    <header class="panel-head">
+      <button class="icon-btn" type="button" data-close data-i18n-label="a11y.close"><svg><use href="#i-down"/></svg></button>
+      <h2 data-i18n="countries.title"></h2>
+      <span class="head-spacer"></span>
+    </header>
+    <div class="panel-tools">
+      <label class="search"><svg><use href="#i-search"/></svg><input id="countrySearch" type="search" autocomplete="off" data-i18n-ph="countries.search"></label>
+      <div class="chips scroll-x" id="continentChips"></div>
+      <button type="button" class="shuffle-card" id="btnShuffleRegion">
+        <span class="shuffle-ico"><svg><use href="#i-dice"/></svg></span>
+        <span class="shuffle-text"><b id="shuffleRegionTitle"></b><small data-i18n="countries.shuffleSub"></small></span>
+      </button>
+    </div>
+    <div class="panel-body" id="countryList"></div>
+  </section>
+
+  <section class="panel" id="panelStations" aria-modal="true" role="dialog" hidden>
+    <header class="panel-head">
+      <button class="icon-btn" type="button" data-close data-i18n-label="a11y.close"><svg><use href="#i-down"/></svg></button>
+      <h2 id="stationsTitle"></h2>
+      <span class="head-spacer"></span>
+    </header>
+    <div class="panel-tools">
+      <label class="search"><svg><use href="#i-search"/></svg><input id="stationSearch" type="search" autocomplete="off" data-i18n-ph="stations.search"></label>
+      <div class="chips scroll-x" id="genreChips"></div>
+    </div>
+    <div class="panel-body" id="stationList"></div>
+  </section>
+
+  <section class="panel" id="panelSearch" aria-modal="true" role="dialog" hidden>
+    <header class="panel-head">
+      <button class="icon-btn" type="button" data-close data-i18n-label="a11y.close"><svg><use href="#i-down"/></svg></button>
+      <h2 data-i18n="search.title"></h2>
+      <span class="head-spacer"></span>
+    </header>
+    <div class="panel-tools">
+      <label class="search"><svg><use href="#i-search"/></svg><input id="globalSearch" type="search" autocomplete="off" enterkeyhint="search" data-i18n-ph="search.placeholder"></label>
+      <div class="seg" id="searchScope" role="tablist">
+        <button type="button" role="tab" data-scope="world" data-i18n="search.world"></button>
+        <button type="button" role="tab" data-scope="country" id="scopeCountryBtn"></button>
+      </div>
+    </div>
+    <div class="panel-body" id="searchBody"></div>
+  </section>
+
+  <section class="panel" id="panelLibrary" aria-modal="true" role="dialog" hidden>
+    <header class="panel-head">
+      <button class="icon-btn" type="button" data-close data-i18n-label="a11y.close"><svg><use href="#i-down"/></svg></button>
+      <h2 data-i18n="library.title"></h2>
+      <span class="head-spacer"></span>
+    </header>
+    <div class="panel-tools">
+      <div class="seg" id="libTabs" role="tablist">
+        <button type="button" role="tab" data-tab="favorites"><span data-i18n="library.favorites"></span> <em id="cntFav"></em></button>
+        <button type="button" role="tab" data-tab="recents"><span data-i18n="library.recents"></span> <em id="cntRec"></em></button>
+        <button type="button" role="tab" data-tab="blocked"><span data-i18n="library.blocked"></span> <em id="cntBlk"></em></button>
+      </div>
+    </div>
+    <div class="panel-body" id="libraryList"></div>
+  </section>
+
+  <section class="panel" id="panelSettings" aria-modal="true" role="dialog" hidden>
+    <header class="panel-head">
+      <button class="icon-btn" type="button" data-close data-i18n-label="a11y.close"><svg><use href="#i-down"/></svg></button>
+      <h2 data-i18n="settings.title"></h2>
+      <span class="head-spacer"></span>
+    </header>
+    <div class="panel-body settings" id="settingsBody"></div>
+  </section>
+
+  <!-- Mini player shown over panels -->
+  <div class="mini" id="mini" hidden>
+    <button type="button" class="mini-info" id="miniInfo">
+      <span class="mini-art" id="miniArt"></span>
+      <span class="mini-text"><b id="miniName"></b><small id="miniMeta"></small></span>
+    </button>
+    <button type="button" class="mini-play" id="miniPlay" data-i18n-label="a11y.play">
+      <svg class="ico-play"><use href="#i-play"/></svg><svg class="ico-pause"><use href="#i-pause"/></svg>
+    </button>
+  </div>
+
+  <!-- Bottom sheet (station actions / sleep timer / confirmations) -->
+  <div class="sheet" id="sheet" role="dialog" aria-modal="true" hidden>
+    <div class="sheet-grab" aria-hidden="true"></div>
+    <div id="sheetBody"></div>
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+</div>
+
+<audio id="audio" preload="none"></audio>
+<script src="app.js"></script>
+<script src="facts.js"></script>
+<script src="pets.js"></script>
+</body>
+</html>
