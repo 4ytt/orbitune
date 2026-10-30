@@ -405,12 +405,74 @@ function logoUrl(s) {
   if (!f || f.startsWith('data:')) return '';
   return f.replace(/^http:\/\//i, 'https://');
 }
+// Radio Browser's own `favicon` field is empty/broken for a lot of
+// stations. Rather than fetch+parse each homepage's og:image (CORS would
+// block that from the plain-web build, and it'd need a request per
+// station), use a public favicon-by-domain service derived from the
+// station's `homepage` field - images aren't subject to CORS the way
+// fetch() is, so this works in both the native and plain-web builds with
+// no API key and no scraping: it's just another <img> that loads (or
+// fails) on its own. Not cached locally (deliberately, for now) - every
+// render asks fresh.
+//
+// Only google's s2/favicons is used here, NOT duckduckgo's icons.duckduckgo
+// service - tried that too, but it has the exact same "returns a generic
+// placeholder with HTTP 404 instead of actually failing" problem as google
+// (confirmed: byte-identical response for two different made-up domains),
+// and unlike google's always-16x16 generic (reliably rejected below by
+// size), duckduckgo's generic comes back at 48x48 - indistinguishable in
+// size from a real favicon, and CORS blocks reading its actual pixels or
+// HTTP status to tell them apart client-side. No reliable way to filter
+// it out, so better to not risk showing it at all.
+function homepageFaviconCandidates(s) {
+  try {
+    const host = new URL(s.homepage).hostname;
+    return host ? [`https://www.google.com/s2/favicons?sz=128&domain=${encodeURIComponent(host)}`] : [];
+  } catch (_) { return []; }
+}
 function artHTML(s, cls = '') {
   const src = logoUrl(s);
+  const candidates = homepageFaviconCandidates(s);
   const h = hash(s.id || s.name) % 360;
-  return `<span class="art ${cls}" style="--h:${h}">${esc(initials(s.name))}${src ? `<img src="${esc(src)}" alt="" loading="lazy" referrerpolicy="no-referrer" data-fallback>` : ''}</span>`;
+  let img = '';
+  if (src) {
+    img = `<img src="${esc(src)}" alt="" loading="lazy" referrerpolicy="no-referrer" data-fallback${candidates.length ? ` data-fallback-queue='${esc(JSON.stringify(candidates))}'` : ''}>`;
+  } else if (candidates.length) {
+    const [first, ...rest] = candidates;
+    img = `<img src="${esc(first)}" alt="" loading="lazy" referrerpolicy="no-referrer" data-fallback${rest.length ? ` data-fallback-queue='${esc(JSON.stringify(rest))}'` : ''}>`;
+  }
+  return `<span class="art ${cls}" style="--h:${h}">${esc(initials(s.name))}${img}</span>`;
 }
-document.addEventListener('error', (e) => { const el = e.target; if (el && el.tagName === 'IMG' && el.hasAttribute('data-fallback')) el.remove(); }, true);
+// Google's favicon-by-domain service returns HTTP 404 but WITH a valid,
+// decodable 16x16 generic globe image body instead of actually failing the
+// request - the <img> load succeeds (no error event) with a useless
+// placeholder image rather than revealing the initials (or trying the
+// next candidate) underneath. Real favicons from that service always come
+// back bigger than 16x16 (checked against several real domains), so
+// that's the only reliable way to tell a genuine icon apart from the
+// generic one once it's loaded. Scoped to that one service by URL, since
+// a real favicon from a DIFFERENT source legitimately can be 16x16.
+function isUselessFallback(el) {
+  return el.naturalWidth <= 16 && el.naturalHeight <= 16 && /google\.com\/s2\/favicons/.test(el.src);
+}
+function advanceArtFallback(el) {
+  let queue = [];
+  try { queue = JSON.parse(el.dataset.fallbackQueue || '[]'); } catch (_) {}
+  if (!queue.length) { el.remove(); return; }
+  const next = queue.shift();
+  if (queue.length) el.dataset.fallbackQueue = JSON.stringify(queue); else delete el.dataset.fallbackQueue;
+  el.src = next;
+}
+document.addEventListener('error', (e) => {
+  const el = e.target;
+  if (!el || el.tagName !== 'IMG' || !el.hasAttribute('data-fallback')) return;
+  advanceArtFallback(el);
+}, true);
+document.addEventListener('load', (e) => {
+  const el = e.target;
+  if (!el || el.tagName !== 'IMG' || !el.hasAttribute('data-fallback')) return;
+  if (isUselessFallback(el)) advanceArtFallback(el);
+}, true);
 
 /* ───────────────────────── library ───────────────────────── */
 const isFav = (id) => state.favorites.some((s) => s.id === id);
@@ -467,12 +529,83 @@ function blockStation(s) {
   renderAll();
 }
 
-/* ───────────────────────── player ───────────────────────── */
-const audio = $('audio');
+/* ───────────────────────── player ─────────────────────────
+   Two engines share the same `player` state and the same callers
+   (playStation/togglePlay/playNeighbour/sleep timer/stats):
+   - Native shell (Capacitor): @capgo/capacitor-native-audio for
+     playback that survives backgrounding, @capgo/capacitor-media-session
+     for the lock-screen/notification UI (play/pause/prev/next).
+   - Plain browser/PWA: the original <audio> element + Web MediaSession API.
+   Neither engine fires a DOM-style `error`/`waiting` event, so failure
+   detection on the native side is a watchdog on the `currentTime` ticks
+   instead (no tick within the window ⇒ treat like the old stall/timeout). */
+const Cap = window.Capacitor;
+const isNative = !!(Cap && Cap.isNativePlatform && Cap.isNativePlatform());
+const NativeAudio = isNative && Cap.Plugins ? Cap.Plugins.NativeAudio : null;
+const MediaSessionNative = isNative && Cap.Plugins ? Cap.Plugins.MediaSession : null;
+const NATIVE_ASSET_ID = 'stream';
+const audio = NativeAudio ? null : $('audio');
+
+// The Android 13+ POST_NOTIFICATIONS prompt (needed for the lock-screen/
+// notification media controls to be allowed to show) is requested natively
+// in MainActivity.onCreate() - not via @capacitor/local-notifications, which
+// would also pull in RECEIVE_BOOT_COMPLETED and SCHEDULE_EXACT_ALARM for
+// scheduling features this app never uses.
+
+let nativeReady = null;
+function ensureNative() {
+  if (!NativeAudio) return Promise.resolve();
+  if (!nativeReady) {
+    nativeReady = NativeAudio.configure({
+      focus: true, background: true, backgroundPlayback: true, showNotification: false,
+    }).catch(() => {});
+  }
+  return nativeReady;
+}
+
+let watchdogTimer = null;
+function clearWatchdog() { clearTimeout(watchdogTimer); watchdogTimer = null; }
+function armWatchdog(ms, onTimeout) { clearWatchdog(); watchdogTimer = setTimeout(onTimeout, ms); }
+
+function setAudioVolume(v) {
+  if (NativeAudio) NativeAudio.setVolume({ assetId: NATIVE_ASSET_ID, volume: Math.max(0.1, v) }).catch(() => {});
+  else audio.volume = v;
+}
+
+// Unlike the <audio> element, the native plugin's stop/unload/preload/play
+// calls don't implicitly cancel each other - issuing a second preload+play
+// before the first one's stop+unload has actually finished can leave two
+// independent native players running at once (two stations audible
+// together, and pause/stop only ever reaching one of them). Every call that
+// mutates native playback goes through this queue so they always run one at
+// a time, in order.
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+let nativeQueue = Promise.resolve();
+function queueNative(task) {
+  const run = () => Promise.resolve().then(task);
+  const p = nativeQueue.then(run, run);
+  nativeQueue = p.catch(() => {});
+  return p;
+}
+let playGen = 0;
+
 const player = {
   station: null, queue: [], queueKind: 'list', history: [], status: 'idle', error: '', skipCount: 0, loadTimer: null,
   get playing() { return this.status === 'live' || this.status === 'loading'; },
-  stop() { audio.pause(); audio.removeAttribute('src'); audio.load(); this.status = 'idle'; render(); },
+  stop() {
+    clearTimeout(this.loadTimer);
+    clearWatchdog();
+    playGen++; // invalidate any in-flight playStation() attempt
+    if (NativeAudio) {
+      queueNative(async () => {
+        try { await NativeAudio.stop({ assetId: NATIVE_ASSET_ID }); } catch (_) {}
+        try { await NativeAudio.unload({ assetId: NATIVE_ASSET_ID }); } catch (_) {}
+        await wait(120); // see the long comment in playStation() below
+      });
+    } else { audio.pause(); audio.removeAttribute('src'); audio.load(); }
+    this.status = 'idle';
+    render();
+  },
 };
 
 function setCurrent(s, queue) {
@@ -484,6 +617,7 @@ function setCurrent(s, queue) {
 
 async function playStation(s, opts = {}) {
   if (!s) return;
+  const gen = ++playGen;
   if (!opts.isSkip) player.skipCount = 0;
   if (!opts.fromHistory && player.station && player.station.id !== s.id) {
     player.history.push(player.station);
@@ -494,16 +628,64 @@ async function playStation(s, opts = {}) {
   player.status = 'loading';
   player.error = '';
   clearTimeout(player.loadTimer);
+  clearWatchdog();
   player.loadTimer = setTimeout(() => onStreamFail('timeout'), 15000);
   if (s.cc && s.cc !== state.country && opts.adoptCountry !== false) selectCountry(s.cc, { quiet: true });
   render();
-  audio.volume = 1;
   player.switching = true;
-  audio.src = s.url;
   try {
-    await audio.play();
+    if (NativeAudio) {
+      await ensureNative();
+      await queueNative(async () => {
+        if (gen !== playGen) return;    // superseded while waiting in the native queue
+        try { await NativeAudio.stop({ assetId: NATIVE_ASSET_ID }); } catch (_) {}
+        try { await NativeAudio.unload({ assetId: NATIVE_ASSET_ID }); } catch (_) {}
+        // @capgo/capacitor-native-audio's unload() resolves its JS promise
+        // before the actual native teardown (player.release(), posted via
+        // runOnUiThread in StreamAudioAsset.unload()) has necessarily run -
+        // confirmed by reading the plugin's Android source. If the UI
+        // thread is busy (an Activity pause/resume is a classic time for
+        // that), the old ExoPlayer can still be mid-teardown when we ask
+        // for a new one on the same assetId, which is exactly the kind of
+        // window that produces "a radio is still playing in the
+        // background" after switching/backgrounding. Give it a moment.
+        await wait(120);
+        if (gen !== playGen) return;
+        try {
+          await NativeAudio.preload({ assetId: NATIVE_ASSET_ID, assetPath: s.url, isUrl: true, volume: 1 });
+        } catch (_) {
+          // NativeAudio.java's preloadAsset() unconditionally rejects if its
+          // internal registry still has an entry for this assetId - which
+          // happens when unload() above threw natively (e.g. posting to a
+          // stale Activity reference) before it ever reached the line that
+          // clears that entry. We silently swallowed that failure above, so
+          // this is the only place left to recover: force another
+          // unload+preload before giving up. Matches the real-world "errors
+          // instantly, a couple of retries later connects fine" report -
+          // this makes the retry automatic instead of needing a user tap.
+          if (gen !== playGen) return;
+          try { await NativeAudio.stop({ assetId: NATIVE_ASSET_ID }); } catch (_) {}
+          try { await NativeAudio.unload({ assetId: NATIVE_ASSET_ID }); } catch (_) {}
+          await wait(120);
+          if (gen !== playGen) return;
+          await NativeAudio.preload({ assetId: NATIVE_ASSET_ID, assetPath: s.url, isUrl: true, volume: 1 });
+        }
+        if (gen !== playGen) {          // superseded while preloading - undo, don't play it
+          try { await NativeAudio.stop({ assetId: NATIVE_ASSET_ID }); } catch (_) {}
+          try { await NativeAudio.unload({ assetId: NATIVE_ASSET_ID }); } catch (_) {}
+          return;
+        }
+        await NativeAudio.play({ assetId: NATIVE_ASSET_ID });
+      });
+    } else {
+      audio.volume = 1;
+      audio.src = s.url;
+      await audio.play();
+    }
+    if (gen !== playGen) return;    // a newer playStation() call already took over
     player.switching = false;
   } catch (e) {
+    if (gen !== playGen) return;    // ditto - don't let an abandoned attempt fail the new one
     player.switching = false;
     if (e && e.name === 'AbortError') return;          // superseded by a newer play
     if (e && e.name === 'NotAllowedError') { clearTimeout(player.loadTimer); player.status = 'ready'; render(); return; }
@@ -517,6 +699,7 @@ async function playStation(s, opts = {}) {
 
 function onStreamFail() {
   clearTimeout(player.loadTimer);
+  clearWatchdog();
   if (player.status !== 'loading' && player.status !== 'live') return;
   const failed = player.station;
   if (state.autoSkip && player.skipCount < 3 && failed) {
@@ -529,26 +712,101 @@ function onStreamFail() {
       return;
     }
   }
-  audio.pause();
+  if (NativeAudio) {
+    const gen = playGen;
+    queueNative(() => { if (gen !== playGen) return; return NativeAudio.pause({ assetId: NATIVE_ASSET_ID }).catch(() => {}); });
+  } else audio.pause();
   player.status = 'error';
   player.error = navigator.onLine === false ? t('error.network') : t('error.stream');
   render();
 }
 
-audio.addEventListener('playing', () => { clearTimeout(player.loadTimer); player.status = 'live'; player.skipCount = 0; render(); updateMediaSession(); });
-audio.addEventListener('waiting', () => { if (player.status === 'live') { player.status = 'loading'; render(); clearTimeout(player.loadTimer); player.loadTimer = setTimeout(() => onStreamFail('stall'), 20000); } });
-audio.addEventListener('error', () => { if (audio.getAttribute('src')) onStreamFail('error'); });
-audio.addEventListener('pause', () => { if (player.switching) return; if (player.status === 'live' || player.status === 'loading') { clearTimeout(player.loadTimer); player.status = 'paused'; render(); updateMediaSession(); } });
+if (NativeAudio) {
+  NativeAudio.addListener('currentTime', () => {
+    if (player.status !== 'loading' && player.status !== 'live') return;
+    clearTimeout(player.loadTimer);
+    if (player.status !== 'live') { player.status = 'live'; player.skipCount = 0; render(); updateMediaSession(); }
+    armWatchdog(20000, () => onStreamFail('stall'));
+  });
+  NativeAudio.addListener('complete', () => { if (player.status === 'live' || player.status === 'loading') onStreamFail('error'); });
 
+  // If the JS-side state ever drifts from what's actually playing natively
+  // (an OEM killing/restarting the process in the background is the usual
+  // trigger - the user sees "not playing" on reopen while the native layer
+  // kept going, or vice versa), re-sync on every resume instead of leaving
+  // a stale UI until the next explicit play/pause tap.
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden || !player.station) return;
+    const genAtQueryTime = playGen; // see below
+    NativeAudio.isPlaying({ assetId: NATIVE_ASSET_ID }).then((res) => {
+      // This query can take a moment; if the user tapped play/pause (or a
+      // new station loaded) while it was in flight, playGen has already
+      // moved on and this result is stale - discard it instead of
+      // stomping on whatever that newer, authoritative action just set.
+      // (Confirmed via ci/unit/resume-reconcile.test.js's race scenario:
+      // without this check, a stale "not playing" reconcile could flip a
+      // station the user just started playing back to "paused".)
+      if (genAtQueryTime !== playGen) return;
+      const reallyPlaying = !!(res && (res.isPlaying ?? res.value));
+      if (reallyPlaying && player.status !== 'live' && player.status !== 'loading') {
+        clearTimeout(player.loadTimer);
+        player.status = 'live';
+        render();
+        updateMediaSession();
+      } else if (!reallyPlaying && (player.status === 'live' || player.status === 'loading')) {
+        clearTimeout(player.loadTimer);
+        clearWatchdog();
+        player.status = 'paused';
+        render();
+        updateMediaSession();
+      }
+    }).catch(() => {});
+  });
+} else {
+  audio.addEventListener('playing', () => { clearTimeout(player.loadTimer); player.status = 'live'; player.skipCount = 0; render(); updateMediaSession(); });
+  audio.addEventListener('waiting', () => { if (player.status === 'live') { player.status = 'loading'; render(); clearTimeout(player.loadTimer); player.loadTimer = setTimeout(() => onStreamFail('stall'), 20000); } });
+  audio.addEventListener('error', () => { if (audio.getAttribute('src')) onStreamFail('error'); });
+  audio.addEventListener('pause', () => { if (player.switching) return; if (player.status === 'live' || player.status === 'loading') { clearTimeout(player.loadTimer); player.status = 'paused'; render(); updateMediaSession(); } });
+}
+
+// ensurePlaying/ensurePaused/ensureStopped are one-directional "make it so"
+// commands - unlike togglePlay() (for the app's own single toggle button),
+// they never inspect-then-do-the-opposite. Needed for anything triggered
+// EXTERNALLY (notification/lock-screen buttons, hardware media keys,
+// launcher "now playing" widgets like Niagara): those send a plain
+// play/pause/stop command, not a toggle, and a late/redundant/dismiss-
+// triggered one arriving while already in that state must be a no-op, not
+// flip to the opposite state. Confirmed real-world trigger: dismissing
+// Niagara Launcher's now-playing widget after pausing from it sends a
+// "stop" command, which - when wired to togglePlay() - saw a non-live
+// status and restarted playback instead of stopping it.
+function ensurePlaying() {
+  if (!player.station || player.status === 'live' || player.status === 'loading') return;
+  playStation(player.station, { queue: player.queue, adoptCountry: false });
+}
+function ensurePaused() {
+  if (!player.station || !(player.status === 'live' || player.status === 'loading')) return;
+  if (NativeAudio) {
+    playGen++; // invalidate any in-flight playStation() attempt so it can't resurrect a 2nd stream
+    const gen = playGen;
+    queueNative(() => { if (gen !== playGen) return; return NativeAudio.pause({ assetId: NATIVE_ASSET_ID }).catch(() => {}); });
+    clearTimeout(player.loadTimer);
+    clearWatchdog();
+    player.status = 'paused';
+    render();
+    updateMediaSession();
+  } else audio.pause();
+}
+function ensureStopped() {
+  if (!player.station) return;
+  player.stop();
+  updateMediaSession();
+}
 function togglePlay() {
   if (!player.station) { shuffleCountry(); return; }
-  if (player.status === 'live' || player.status === 'loading') { audio.pause(); return; }
-  if (player.status === 'paused' && audio.getAttribute('src')) {
-    // Live radio: rejoin the live edge instead of resuming a stale buffer.
-    playStation(player.station, { queue: player.queue, adoptCountry: false });
-    return;
-  }
-  playStation(player.station, { queue: player.queue, adoptCountry: false });
+  if (player.status === 'live' || player.status === 'loading') { ensurePaused(); return; }
+  // Live radio: rejoin the live edge instead of resuming a stale buffer.
+  ensurePlaying();
 }
 
 function neighbour(dir, skipping) {
@@ -591,29 +849,43 @@ function shuffleCountry() {
 /* Media Session: lock screen + notification controls, including next/prev. */
 let msKey = '';
 function updateMediaSession() {
-  if (!('mediaSession' in navigator) || !player.station) return;
+  if (!player.station) return;
+  if (!NativeAudio && !('mediaSession' in navigator)) return;
   const s = player.station;
   const key = s.id + '|' + player.status + '|' + state.lang;
   if (key === msKey) return;
   msKey = key;
-  const art = logoUrl(s);
-  try {
-    navigator.mediaSession.metadata = new MediaMetadata({
-      title: s.name,
-      artist: [countryLabel(s.cc), genreOf(s)].filter(Boolean).join(' · '),
-      album: 'Orbitune',
-      artwork: art ? [{ src: art, sizes: '256x256' }, { src: 'icons/icon-512.png', sizes: '512x512', type: 'image/png' }]
-                   : [{ src: 'icons/icon-512.png', sizes: '512x512', type: 'image/png' }],
-    });
-    navigator.mediaSession.playbackState = player.status === 'live' || player.status === 'loading' ? 'playing' : 'paused';
-  } catch (_) {}
+  const art = logoUrl(s) || homepageFaviconCandidates(s)[0] || '';
+  const artwork = art
+    ? [{ src: art, sizes: '256x256', type: 'image/png' }, { src: 'icons/icon-512.png', sizes: '512x512', type: 'image/png' }]
+    : [{ src: 'icons/icon-512.png', sizes: '512x512', type: 'image/png' }];
+  const title = s.name;
+  const artist = [countryLabel(s.cc), genreOf(s)].filter(Boolean).join(' · ');
+  const album = 'Orbitune';
+  const playbackState = player.status === 'live' || player.status === 'loading' ? 'playing' : 'paused';
+  if (MediaSessionNative) {
+    MediaSessionNative.setMetadata({ title, artist, album, artwork }).catch(() => {});
+    MediaSessionNative.setPlaybackState({ playbackState }).catch(() => {});
+  } else {
+    try {
+      navigator.mediaSession.metadata = new MediaMetadata({ title, artist, album, artwork });
+      navigator.mediaSession.playbackState = playbackState;
+    } catch (_) {}
+  }
 }
-if ('mediaSession' in navigator) {
+if (MediaSessionNative) {
+  const set = (action, fn) => { try { MediaSessionNative.setActionHandler({ action }, () => fn()); } catch (_) {} };
+  set('play', () => ensurePlaying());
+  set('pause', () => ensurePaused());
+  set('stop', () => ensureStopped());
+  set('nexttrack', () => playNeighbour(1));
+  set('previoustrack', () => playNeighbour(-1));
+} else if ('mediaSession' in navigator) {
   const ms = navigator.mediaSession;
   const set = (a, fn) => { try { ms.setActionHandler(a, fn); } catch (_) {} };
-  set('play', () => togglePlay());
-  set('pause', () => audio.pause());
-  set('stop', () => audio.pause());
+  set('play', () => ensurePlaying());
+  set('pause', () => ensurePaused());
+  set('stop', () => ensureStopped());
   set('nexttrack', () => playNeighbour(1));
   set('previoustrack', () => playNeighbour(-1));
 }
@@ -621,7 +893,7 @@ if ('mediaSession' in navigator) {
 /* listening stats */
 let statTick = 0;
 setInterval(() => {
-  if (player.status === 'live' && !audio.paused) {
+  if (player.status === 'live' && (NativeAudio || !audio.paused)) {
     state.listenSeconds++;
     if (++statTick % 15 === 0) save();
   }
@@ -631,7 +903,7 @@ setInterval(() => {
 const sleep = { endAt: 0, minutes: 0, timer: null };
 function setSleep(min) {
   clearInterval(sleep.timer);
-  audio.volume = 1;
+  setAudioVolume(1);
   sleep.minutes = min;
   sleep.endAt = min ? Date.now() + min * 60000 : 0;
   if (min) {
@@ -647,12 +919,19 @@ function sleepTick() {
   chip.hidden = false;
   const sec = Math.ceil(left / 1000);
   $('sleepChipText').textContent = `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
-  if (left < 20000) audio.volume = clamp(left / 20000, 0, 1);
+  if (left < 20000) setAudioVolume(clamp(left / 20000, 0, 1));
   if (left <= 0) {
     clearInterval(sleep.timer);
     sleep.endAt = 0; sleep.minutes = 0;
-    audio.pause();
-    audio.volume = 1;
+    if (NativeAudio) {
+      playGen++; // invalidate any in-flight playStation() attempt so it can't resurrect a 2nd stream
+      const gen = playGen;
+      queueNative(() => { if (gen !== playGen) return; return NativeAudio.pause({ assetId: NATIVE_ASSET_ID }).catch(() => {}); });
+      clearTimeout(player.loadTimer);
+      clearWatchdog();
+      if (player.status === 'live' || player.status === 'loading') { player.status = 'paused'; render(); updateMediaSession(); }
+    } else audio.pause();
+    setAudioVolume(1);
     chip.hidden = true;
     toast(t('toast.sleepDone'));
   }
@@ -805,10 +1084,21 @@ function paintLabel(s) {
   labelFor = key;
   const img = $('discLogo');
   const src = s ? logoUrl(s) : '';
+  const queue = s ? homepageFaviconCandidates(s) : [];
   img.hidden = true;
-  img.onload = () => { if (labelFor === key) img.hidden = false; };
-  img.onerror = () => { img.hidden = true; };
-  if (src) img.src = src; else img.removeAttribute('src');
+  const tryNext = () => {
+    if (!queue.length) { img.hidden = true; return; }
+    img.src = queue.shift();
+  };
+  img.onload = () => {
+    if (labelFor !== key) return;
+    if (isUselessFallback(img)) { tryNext(); return; }
+    img.hidden = false;
+  };
+  img.onerror = () => tryNext();
+  if (src) img.src = src;
+  else if (queue.length) img.src = queue.shift();
+  else img.removeAttribute('src');
 }
 function paintDial(s) {
   if (!state.modules.dial) return;
@@ -1551,6 +1841,23 @@ async function boot() {
   if (state.lastStation && playable(state.lastStation)) {
     player.station = state.lastStation;
     player.status = 'idle';
+    // If the Activity/WebView got recreated while the native player was
+    // still actually going (an OEM killing/recreating it in the
+    // background is the leading theory), this fresh boot() has no idea -
+    // without this check the UI would show idle/not-playing over audio
+    // that's genuinely still live, and a later playStation() call (e.g.
+    // from shuffle) would start a SECOND stream on top of it instead of
+    // taking over the existing one. Same reconciliation the
+    // visibilitychange handler does below, just also needed here since a
+    // fresh boot is a separate code path from a resume.
+    if (NativeAudio) {
+      const genAtBoot = playGen;
+      NativeAudio.isPlaying({ assetId: NATIVE_ASSET_ID }).then((res) => {
+        if (genAtBoot !== playGen) return;
+        const reallyPlaying = !!(res && (res.isPlaying ?? res.value));
+        if (reallyPlaying) { player.status = 'live'; render(); updateMediaSession(); }
+      }).catch(() => {});
+    }
   }
   const shared = new URLSearchParams(location.search).get('s');
   if (shared) history.replaceState({ root: 1 }, '', location.pathname);
@@ -1570,7 +1877,7 @@ async function boot() {
       }
     } catch (_) {}
   }
-  if ('serviceWorker' in navigator && location.protocol === 'https:') {
+  if (!isNative && 'serviceWorker' in navigator && location.protocol === 'https:') {
     navigator.serviceWorker.register('sw.js').catch(() => {});
   }
 }

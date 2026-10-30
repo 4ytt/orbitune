@@ -1,0 +1,135 @@
+name: Real App Crash & Lifecycle Test
+
+on:
+  workflow_dispatch: {}
+  push:
+    branches:
+      - 'main'
+      - 'feature/**'
+    paths:
+      - 'app.js'
+      - 'index.html'
+      - 'facts.js'
+      - 'pets.js'
+      - 'package.json'
+      - 'capacitor.config.json'
+      - 'ci/debug/**'
+      - '.github/workflows/debug-logcat.yml'
+
+jobs:
+  debug:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Prepare web assets
+        run: |
+          rm -rf www
+          mkdir -p www/icons
+          cp index.html styles.css app.js facts.js pets.js manifest.webmanifest sw.js www/
+          cp icons/*.png www/icons/
+
+      - name: Add Android platform
+        run: npx cap add android
+
+      - name: Sync web assets into Android project
+        run: npx cap copy android
+
+      - name: Add background audio permissions
+        working-directory: android/app/src/main
+        run: |
+          sed -i '/<uses-permission android:name="android.permission.INTERNET"/a\
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />\
+              <uses-permission android:name="android.permission.WAKE_LOCK" />\
+              <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />' AndroidManifest.xml
+
+      - name: Keep playback alive when backing out, request notification permission natively
+        run: |
+          mkdir -p android/app/src/main/java/com/orbitune/app
+          cat > android/app/src/main/java/com/orbitune/app/MainActivity.java <<'EOF'
+          package com.orbitune.app;
+
+          import android.Manifest;
+          import android.content.pm.PackageManager;
+          import android.os.Build;
+          import android.os.Bundle;
+          import androidx.core.app.ActivityCompat;
+          import androidx.core.content.ContextCompat;
+          import com.getcapacitor.BridgeActivity;
+
+          public class MainActivity extends BridgeActivity {
+              @Override
+              public void onCreate(Bundle savedInstanceState) {
+                  super.onCreate(savedInstanceState);
+                  if (Build.VERSION.SDK_INT >= 33
+                      && ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                      ActivityCompat.requestPermissions(this, new String[] { Manifest.permission.POST_NOTIFICATIONS }, 1001);
+                  }
+              }
+
+              // Call webView.goBack() directly rather than super.onBackPressed() -
+              // see android-apk.yml's MainActivity for why (super.onBackPressed()
+              // on a BridgeActivity isn't guaranteed to just navigate WebView
+              // history; it can finish() the Activity and orphan the native
+              // audio player, which a real report traced to backing out while a
+              // panel was open).
+              @Override
+              public void onBackPressed() {
+                  if (getBridge() != null && getBridge().getWebView() != null && getBridge().getWebView().canGoBack()) {
+                      getBridge().getWebView().goBack();
+                  } else {
+                      moveTaskToBack(true);
+                  }
+              }
+          }
+          EOF
+
+      - name: Build debug APK
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon
+
+      - name: Enable KVM for the emulator
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Launch the real app and capture logcat
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          force-avd-creation: false
+          emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          disable-animations: true
+          script: bash ci/debug/check.sh
+
+      - name: Upload logcat
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: real-app-logcat
+          path: |
+            full_logcat.txt
+            filtered_logcat.txt
+            after_reopen_logcat.txt
+            second_launch_logcat.txt
+          if-no-files-found: ignore

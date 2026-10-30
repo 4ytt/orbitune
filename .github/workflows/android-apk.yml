@@ -1,0 +1,199 @@
+name: Android APK Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Prepare web assets
+        run: |
+          rm -rf www
+          mkdir -p www/icons
+          cp index.html styles.css app.js facts.js pets.js manifest.webmanifest sw.js www/
+          cp icons/*.png www/icons/
+
+      - name: Determine version
+        id: version
+        run: |
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            RAW="${{ github.ref_name }}"
+            NAME="${RAW#v}"
+            TAG="${RAW}"
+            TITLE="Orbitune v${NAME}"
+            PRERELEASE=false
+          else
+            NAME="0.0.0-dev.${{ github.run_number }}"
+            TAG="dev-${{ github.run_number }}"
+            TITLE="Orbitune dev build ${{ github.run_number }}"
+            PRERELEASE=true
+          fi
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+          echo "code=${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "title=$TITLE" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$PRERELEASE" >> "$GITHUB_OUTPUT"
+
+      - name: Add Android platform
+        run: npx cap add android
+
+      - name: Sync web assets into Android project
+        run: npx cap copy android
+
+      - name: Set app version
+        working-directory: android/app
+        run: |
+          sed -i "s/versionCode [0-9]\+/versionCode ${{ steps.version.outputs.code }}/" build.gradle
+          sed -i "s/versionName \"[^\"]*\"/versionName \"${{ steps.version.outputs.name }}\"/" build.gradle
+          grep -E "versionCode|versionName" build.gradle
+
+      - name: Add background audio permissions
+        working-directory: android/app/src/main
+        run: |
+          sed -i '/<uses-permission android:name="android.permission.INTERNET"/a\
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />\
+              <uses-permission android:name="android.permission.WAKE_LOCK" />' AndroidManifest.xml
+          grep -E "FOREGROUND_SERVICE_MEDIA_PLAYBACK|WAKE_LOCK" AndroidManifest.xml
+
+      - name: Keep playback alive when backing out, request notification permission natively
+        run: |
+          mkdir -p android/app/src/main/java/com/orbitune/app
+          cat > android/app/src/main/java/com/orbitune/app/MainActivity.java <<'EOF'
+          package com.orbitune.app;
+
+          import android.Manifest;
+          import android.content.pm.PackageManager;
+          import android.os.Build;
+          import android.os.Bundle;
+          import androidx.core.app.ActivityCompat;
+          import androidx.core.content.ContextCompat;
+          import com.getcapacitor.BridgeActivity;
+
+          public class MainActivity extends BridgeActivity {
+              @Override
+              public void onCreate(Bundle savedInstanceState) {
+                  super.onCreate(savedInstanceState);
+                  // Needed for the lock-screen/notification media controls to be allowed to
+                  // show at all on Android 13+ - the same single permission prompt Spotify
+                  // and every other media app with a notification ask for. Deliberately NOT
+                  // also requesting battery-optimization exemption or opening any OEM
+                  // "autostart" settings screen automatically - Spotify doesn't do either,
+                  // and users reasonably don't want an app jumping into random system
+                  // settings on first launch.
+                  if (Build.VERSION.SDK_INT >= 33
+                      && ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                      ActivityCompat.requestPermissions(this, new String[] { Manifest.permission.POST_NOTIFICATIONS }, 1001);
+                  }
+              }
+
+              // Default Capacitor behaviour finishes (destroys) the Activity when the
+              // back button is pressed at the root screen. That tears down app.js and
+              // every JS-side plugin instance while the native audio player (which
+              // isn't tied to the Activity) keeps playing - leaving it orphaned, with
+              // no way for the next launch's fresh plugin instance to reach it. Mirror
+              // the Home button instead: only actually go back if there's in-app
+              // history (closing a sheet/panel) to go back to.
+              //
+              // Deliberately calling webView.goBack() directly here instead of
+              // super.onBackPressed() - a real report was that backing out while a
+              // panel (e.g. settings) was open still backgrounded/killed the app
+              // instead of just closing the panel. super.onBackPressed() on a
+              // BridgeActivity can route through Capacitor's own
+              // OnBackPressedDispatcher callback (or, if that's not registered,
+              // fall through to the plain Activity behaviour, which finishes()),
+              // neither of which is the one guaranteed outcome we actually want -
+              // navigate the WebView's own history back. goBack() can never finish
+              // the Activity, so the native audio player can never be orphaned by
+              // this path, panel open or not.
+              @Override
+              public void onBackPressed() {
+                  if (getBridge() != null && getBridge().getWebView() != null && getBridge().getWebView().canGoBack()) {
+                      getBridge().getWebView().goBack();
+                  } else {
+                      moveTaskToBack(true);
+                  }
+              }
+          }
+          EOF
+
+      - name: Build debug APK
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon
+
+      - name: Rename APK
+        id: apk
+        run: |
+          SRC=$(find android/app/build/outputs/apk/debug -name '*.apk' | head -n1)
+          DEST="android/app/build/outputs/apk/debug/Orbitune-${{ steps.version.outputs.tag }}.apk"
+          cp "$SRC" "$DEST"
+          echo "path=$DEST" >> "$GITHUB_OUTPUT"
+
+      - name: Verify background audio is wired into the built APK
+        run: |
+          AAPT=$(find "$ANDROID_HOME" -name aapt -type f | sort -V | tail -n1)
+          "$AAPT" dump xmltree "${{ steps.apk.outputs.path }}" AndroidManifest.xml > /tmp/manifest-dump.txt
+          echo "--- relevant manifest entries ---"
+          grep -E "FOREGROUND_SERVICE|WAKE_LOCK|POST_NOTIFICATIONS|MediaSessionService|foregroundServiceType" /tmp/manifest-dump.txt || true
+          fail=0
+          for perm in FOREGROUND_SERVICE FOREGROUND_SERVICE_MEDIA_PLAYBACK WAKE_LOCK POST_NOTIFICATIONS; do
+            grep -q "android.permission.$perm" /tmp/manifest-dump.txt || { echo "::error::Missing permission in merged manifest: $perm"; fail=1; }
+          done
+          grep -q "MediaSessionService" /tmp/manifest-dump.txt || { echo "::error::MediaSessionService not found in merged manifest"; fail=1; }
+          exit $fail
+
+      - name: Audit the exact permission set (no silent additions from a plugin update)
+        run: |
+          grep -o 'android:name(0x01010003)="android\.permission\.[A-Za-z_.]*"' /tmp/manifest-dump.txt \
+            | sed -E 's/.*"(android\.permission\.[A-Za-z_.]*)"/\1/' | sort -u > /tmp/actual-permissions.txt
+          echo "--- permissions present in the merged manifest ---"
+          cat /tmp/actual-permissions.txt
+          cat > /tmp/allowed-permissions.txt <<'EOF'
+          android.permission.ACCESS_NETWORK_STATE
+          android.permission.FOREGROUND_SERVICE
+          android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK
+          android.permission.INTERNET
+          android.permission.POST_NOTIFICATIONS
+          android.permission.WAKE_LOCK
+          EOF
+          sed -i 's/^[[:space:]]*//' /tmp/allowed-permissions.txt
+          sort -u /tmp/allowed-permissions.txt -o /tmp/allowed-permissions.txt
+          echo "--- diff vs the expected set (< missing, > unexpected) ---"
+          if ! diff /tmp/allowed-permissions.txt /tmp/actual-permissions.txt; then
+            echo "::error::Permission set changed - a plugin update added or removed a permission. Review and update the allowlist in this workflow step deliberately."
+            exit 1
+          fi
+          echo "Permission set matches exactly what's expected."
+
+      - name: Publish GitHub Release with APK
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: ${{ steps.version.outputs.title }}
+          files: ${{ steps.apk.outputs.path }}
+          prerelease: ${{ steps.version.outputs.prerelease }}

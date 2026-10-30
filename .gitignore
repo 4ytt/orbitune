@@ -1,0 +1,8 @@
+node_modules/
+www/
+android/
+ios/
+*.apk
+*.aab
+.DS_Store
+ci/smoke/web/assets/

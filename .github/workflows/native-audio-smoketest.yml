@@ -1,0 +1,171 @@
+name: Native Audio Smoke Test
+
+on:
+  workflow_dispatch: {}
+  push:
+    branches:
+      - 'main'
+      - 'feature/**'
+    paths:
+      - 'ci/smoke/**'
+      - 'ci/unit/**'
+      - 'app.js'
+      - 'index.html'
+      - 'facts.js'
+      - 'pets.js'
+      - 'package.json'
+      - 'capacitor.config.json'
+      - '.github/workflows/native-audio-smoketest.yml'
+
+jobs:
+  # Fast, no emulator needed - runs in parallel with smoke-test below.
+  pure-logic-unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Run playback mutex regression test
+        run: node ci/unit/playback-mutex.test.js
+
+      - name: Run station/navigation pure-logic tests
+        run: node ci/unit/pure-logic.test.js
+
+      - name: Run display/state pure-logic tests
+        run: node ci/unit/display-and-state.test.js
+
+      - name: Run data-integrity pure-logic tests
+        run: node ci/unit/data-integrity.test.js
+
+      - name: Install dom-boot test dependencies
+        working-directory: ci/unit
+        run: npm ci
+
+      - name: Run dom-boot crash test (real index.html + app.js + facts.js + pets.js in jsdom)
+        run: node ci/unit/dom-boot.test.js
+
+      - name: Run resume/visibility state-reconciliation test
+        run: node ci/unit/resume-reconcile.test.js
+
+      - name: Run boot-time native-playback reconciliation test
+        run: node ci/unit/boot-reconcile.test.js
+
+      - name: Run MediaSession action-handler one-directionality test
+        run: node ci/unit/mediasession-actions.test.js
+
+  smoke-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Install smoke-test harness dependencies
+        working-directory: ci/smoke
+        run: npm install
+
+      - name: Generate local test tones (no external stream dependency)
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
+          mkdir -p ci/smoke/web/assets/sounds
+          ffmpeg -f lavfi -i "sine=frequency=440:duration=3" -q:a 9 -acodec libmp3lame -y ci/smoke/web/assets/sounds/test.mp3
+          # Two audibly-distinct tones for the overlap stress test - if two
+          # of these ever play genuinely at once, dumpsys audio shows it.
+          ffmpeg -f lavfi -i "sine=frequency=440:duration=3" -q:a 9 -acodec libmp3lame -y ci/smoke/web/assets/sounds/toneA.mp3
+          ffmpeg -f lavfi -i "sine=frequency=880:duration=3" -q:a 9 -acodec libmp3lame -y ci/smoke/web/assets/sounds/toneB.mp3
+
+      - name: Add Android platform
+        working-directory: ci/smoke
+        run: npx cap add android
+
+      - name: Sync web assets into Android project
+        working-directory: ci/smoke
+        run: npx cap copy android
+
+      - name: Add background audio permissions
+        working-directory: ci/smoke/android/app/src/main
+        run: |
+          sed -i '/<uses-permission android:name="android.permission.INTERNET"/a\
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />\
+              <uses-permission android:name="android.permission.WAKE_LOCK" />' AndroidManifest.xml
+          grep -E "FOREGROUND_SERVICE_MEDIA_PLAYBACK|WAKE_LOCK" AndroidManifest.xml
+
+      - name: Mirror the real app's back-button fix (so this harness tests the same code path)
+        run: |
+          mkdir -p ci/smoke/android/app/src/main/java/com/orbitune/smoketest
+          cat > ci/smoke/android/app/src/main/java/com/orbitune/smoketest/MainActivity.java <<'EOF'
+          package com.orbitune.smoketest;
+
+          import com.getcapacitor.BridgeActivity;
+
+          public class MainActivity extends BridgeActivity {
+              // Call webView.goBack() directly rather than super.onBackPressed() -
+              // see android-apk.yml's MainActivity for why.
+              @Override
+              public void onBackPressed() {
+                  if (getBridge() != null && getBridge().getWebView() != null && getBridge().getWebView().canGoBack()) {
+                      getBridge().getWebView().goBack();
+                  } else {
+                      moveTaskToBack(true);
+                  }
+              }
+          }
+          EOF
+
+      - name: Build smoke-test debug APK
+        working-directory: ci/smoke/android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon
+
+      - name: Enable KVM for the emulator
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Boot emulator and verify background playback + lock-screen media session
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          force-avd-creation: false
+          emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          disable-animations: true
+          script: bash ci/smoke/check.sh
+
+      - name: Upload diagnostic dumps
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-test-dumps
+          path: |
+            media_session.txt
+            notification_full.txt
+            notification.txt
+            services.txt
+            transport_logcat.txt
+            media_session_after_back.txt
+            notification_full_after_back.txt
+            notification_after_back.txt
+            services_after_back.txt
+            transport_logcat_after_back.txt
+            overlap_samples.txt
+            stress_logcat.txt
+          if-no-files-found: ignore

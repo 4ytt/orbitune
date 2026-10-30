@@ -1,0 +1,31 @@
+diff --git a/node_modules/@capgo/capacitor-media-session/android/src/main/java/com/capgo/mediasession/MediaSessionService.java b/node_modules/@capgo/capacitor-media-session/android/src/main/java/com/capgo/mediasession/MediaSessionService.java
+index 07a5f6d..4b4e43e 100644
+--- a/node_modules/@capgo/capacitor-media-session/android/src/main/java/com/capgo/mediasession/MediaSessionService.java
++++ b/node_modules/@capgo/capacitor-media-session/android/src/main/java/com/capgo/mediasession/MediaSessionService.java
+@@ -140,9 +140,16 @@ public class MediaSessionService extends Service {
+             new NotificationCompat.Action(
+                 R.drawable.ic_baseline_play_arrow_24,
+                 "Play",
++                // MediaButtonReceiver.buildMediaButtonPendingIntent()'s internal
++                // toKeyCode(long) only matches a SINGLE PlaybackStateCompat.ACTION_*
++                // constant by exact equality - a bitwise-OR'd combination like
++                // ACTION_PLAY_PAUSE | ACTION_PLAY never equals ACTION_PLAY,
++                // ACTION_PLAY_PAUSE, or anything else it checks for, so it falls
++                // through to KEYCODE_UNKNOWN and the resulting PendingIntent does
++                // nothing when tapped. Passing the single flag fixes it.
+                 MediaButtonReceiver.buildMediaButtonPendingIntent(
+                     this,
+-                    PlaybackStateCompat.ACTION_PLAY_PAUSE | PlaybackStateCompat.ACTION_PLAY
++                    PlaybackStateCompat.ACTION_PLAY
+                 )
+             )
+         );
+@@ -153,7 +160,7 @@ public class MediaSessionService extends Service {
+                 "Pause",
+                 MediaButtonReceiver.buildMediaButtonPendingIntent(
+                     this,
+-                    PlaybackStateCompat.ACTION_PLAY_PAUSE | PlaybackStateCompat.ACTION_PAUSE
++                    PlaybackStateCompat.ACTION_PAUSE
+                 )
+             )
+         );
