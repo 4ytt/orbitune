@@ -1,0 +1,9 @@
+{
+  "name": "orbitune-unit-tests",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Test-only dependencies for ci/unit/*.test.js - not used by the app itself.",
+  "devDependencies": {
+    "jsdom": "^25.0.1"
+  }
+}

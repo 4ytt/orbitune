@@ -1,0 +1,36 @@
+diff --git a/node_modules/@capgo/capacitor-media-session/android/src/main/java/com/capgo/mediasession/MediaSessionService.java b/node_modules/@capgo/capacitor-media-session/android/src/main/java/com/capgo/mediasession/MediaSessionService.java
+index 4b4e43e..94c6c0f 100644
+--- a/node_modules/@capgo/capacitor-media-session/android/src/main/java/com/capgo/mediasession/MediaSessionService.java
++++ b/node_modules/@capgo/capacitor-media-session/android/src/main/java/com/capgo/mediasession/MediaSessionService.java
+@@ -220,6 +220,31 @@ public class MediaSessionService extends Service {
+         stopSelf();
+     }
+ 
++    // Without this, swiping the app away from the recents/"running apps"
++    // screen does nothing - this foreground service (and the process it
++    // keeps alive, native audio player included) survives task removal
++    // by design, same as it survives an Activity recreation. That's
++    // correct for a real backgrounding (Home button), but a user swiping
++    // the task away is a clear "stop" signal, same as Spotify/YouTube
++    // Music treat it.
++    //
++    // stopForeground()+stopSelf() alone stops THIS service, but by then
++    // the Activity/WebView is already gone (task removal destroys it
++    // immediately) - any attempt to reach the native audio player
++    // through the JS bridge (plugin.actionCallback("stop")) would
++    // silently no-op since there's no bridge left to deliver it to, and
++    // Android doesn't guarantee reclaiming the rest of the now-serviceless
++    // process right away. Killing the process directly guarantees the
++    // player actually stops immediately rather than "eventually, maybe" -
++    // acceptable here since there's nothing left in this process the user
++    // could still be looking at once its one screen's task is gone.
++    @Override
++    public void onTaskRemoved(Intent rootIntent) {
++        destroy();
++        super.onTaskRemoved(rootIntent);
++        android.os.Process.killProcess(android.os.Process.myPid());
++    }
++
+     @Override
+     public int onStartCommand(Intent intent, int flags, int startId) {
+         if (mediaSession != null) {

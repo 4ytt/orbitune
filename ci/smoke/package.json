@@ -1,0 +1,15 @@
+{
+  "name": "orbitune-native-audio-smoketest",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Isolated harness used only in CI to verify background audio + lock-screen media controls actually work on a real emulator.",
+  "dependencies": {
+    "@capacitor/android": "^8.6.0",
+    "@capacitor/core": "^8.6.0",
+    "@capgo/capacitor-media-session": "^8.1.6",
+    "@capgo/capacitor-native-audio": "^8.4.38"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^8.6.0"
+  }
+}
